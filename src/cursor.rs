@@ -107,6 +107,9 @@ struct NodeData {
     green: ptr::NonNull<GreenNode>,
 }
 
+unsafe impl Send for NodeData {}
+unsafe impl Sync for NodeData {}
+
 struct FreeList {
     first_free: Option<Arc<NodeData>>,
     len: usize,
