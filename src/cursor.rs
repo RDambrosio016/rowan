@@ -3,7 +3,7 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     iter, mem, ptr,
-    rc::Rc,
+    sync::Arc,
 };
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct SyntaxNode(Rc<NodeData>);
+pub struct SyntaxNode(Arc<NodeData>);
 
 impl Drop for SyntaxNode {
     fn drop(&mut self) {
@@ -89,7 +89,7 @@ impl fmt::Display for SyntaxElement {
 enum Kind {
     Root(GreenNode),
     Child { parent: SyntaxNode, index: u32, offset: TextSize },
-    Free { next_free: Option<Rc<NodeData>> },
+    Free { next_free: Option<Arc<NodeData>> },
 }
 
 impl Kind {
@@ -108,7 +108,7 @@ struct NodeData {
 }
 
 struct FreeList {
-    first_free: Option<Rc<NodeData>>,
+    first_free: Option<Arc<NodeData>>,
     len: usize,
 }
 
@@ -118,7 +118,7 @@ impl FreeList {
     fn new() -> FreeList {
         let mut res = FreeList { first_free: None, len: 0 };
         for _ in 0..FREE_LIST_LEN {
-            res.try_push(&mut Rc::new(NodeData {
+            res.try_push(&mut Arc::new(NodeData {
                 kind: Kind::Free { next_free: None },
                 green: ptr::NonNull::dangling(),
             }))
@@ -133,11 +133,11 @@ impl FreeList {
         INSTANCE.with(|it| f(&mut *it.borrow_mut()))
     }
 
-    fn pop(&mut self) -> Option<Rc<NodeData>> {
+    fn pop(&mut self) -> Option<Arc<NodeData>> {
         let mut node = self.first_free.take()?;
         self.len -= 1;
         {
-            let node = Rc::get_mut(&mut node).unwrap();
+            let node = Arc::get_mut(&mut node).unwrap();
             self.first_free = match &mut node.kind {
                 Kind::Free { next_free } => next_free.take(),
                 _ => unreachable!(),
@@ -146,34 +146,34 @@ impl FreeList {
         Some(node)
     }
 
-    fn try_push(&mut self, node: &mut Rc<NodeData>) {
+    fn try_push(&mut self, node: &mut Arc<NodeData>) {
         if self.len >= FREE_LIST_LEN {
             return;
         }
-        Rc::get_mut(node).unwrap().kind = Kind::Free { next_free: self.first_free.take() };
-        self.first_free = Some(Rc::clone(node));
+        Arc::get_mut(node).unwrap().kind = Kind::Free { next_free: self.first_free.take() };
+        self.first_free = Some(Arc::clone(node));
         self.len += 1;
     }
 }
 
 impl NodeData {
-    fn new(kind: Kind, green: ptr::NonNull<GreenNode>) -> Rc<NodeData> {
+    fn new(kind: Kind, green: ptr::NonNull<GreenNode>) -> Arc<NodeData> {
         let mut node = FreeList::with(|it| it.pop()).unwrap_or_else(|| {
-            Rc::new(NodeData {
+            Arc::new(NodeData {
                 kind: Kind::Free { next_free: None },
                 green: ptr::NonNull::dangling(),
             })
         });
 
         {
-            let node = Rc::get_mut(&mut node).unwrap();
+            let node = Arc::get_mut(&mut node).unwrap();
             node.kind = kind;
             node.green = green;
         }
         node
     }
-    fn delete(this: &mut Rc<NodeData>) {
-        if let Some(this_mut) = Rc::get_mut(this) {
+    fn delete(this: &mut Arc<NodeData>) {
+        if let Some(this_mut) = Arc::get_mut(this) {
             // NB: this might drop SyntaxNodes
             this_mut.kind = Kind::Free { next_free: None };
             FreeList::with(|it| it.try_push(this))
@@ -182,7 +182,7 @@ impl NodeData {
 }
 
 impl SyntaxNode {
-    fn new(data: Rc<NodeData>) -> SyntaxNode {
+    fn new(data: Arc<NodeData>) -> SyntaxNode {
         SyntaxNode(data)
     }
 
@@ -193,7 +193,7 @@ impl SyntaxNode {
             Kind::Root(green) => green.into(),
             _ => unreachable!(),
         };
-        Rc::get_mut(&mut ret.0).unwrap().green = green;
+        Arc::get_mut(&mut ret.0).unwrap().green = green;
         ret
     }
 
@@ -443,7 +443,7 @@ impl SyntaxNode {
     /// Precondition: offset must be withing node's range.
     pub fn token_at_offset(&self, offset: TextSize) -> TokenAtOffset<SyntaxToken> {
         // TODO: this could be faster if we first drill-down to node, and only
-        // then switch to token search. We should also replace explicit
+        // then switch to token seaArch. We should also replace explicit
         // recursion with a loop.
         let range = self.text_range();
         assert!(
